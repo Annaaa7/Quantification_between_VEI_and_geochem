@@ -616,7 +616,7 @@ X_mean_sd_cols <- grep("_mean_plus_sd$", names(train), value = TRUE)
 ```
 
 
-lda (this doesnt work the first time i run it, i have to rerun the previous chunk for it to work, idk why)
+# lda (this doesnt work the first time i run it, i have to rerun the previous chunk for it to work, idk why)
 
 ```{r}
 
@@ -1183,7 +1183,7 @@ ggplot(df_all_preds, aes(x = Expected_VEI, y = Predicted_VEI, color = Model)) +
 ```
 
 
-all models
+# all models for avo
 ```{r}
 # filter the data with New_Vei
 df_true <- eruption_summary_oxides_vei_volcano %>%
@@ -1552,35 +1552,58 @@ print(result_vei7_nb)
 # RF (no vei 7 in training set)
 
 ```{r}
-library(randomForest)
 
+library(ranger)
+
+# --- Train set (mêmes étapes que NB) ---
 train_rf <- eruption_summary_oxides_vei_volcano %>%
   dplyr::filter(New_Vei %in% 1:6) %>%
-  mutate(New_Vei = as.factor(New_Vei))  
+  mutate(New_Vei = as.factor(New_Vei))
 
-X_rf <- train_rf[, X_mean_sd_cols]
+X_rf <- train_rf[, X_mean_sd_cols, drop = FALSE]
 y_rf <- train_rf$New_Vei
 
-model_rf <- randomForest(
-  x = X_rf,
-  y = y_rf,
-  ntree = 500,
-  importance = TRUE
+# delete NA (comme pour NB)
+complete_idx <- complete.cases(X_rf)
+X_rf <- X_rf[complete_idx, , drop = FALSE]
+y_rf <- y_rf[complete_idx]
+
+# ranger accepte la formule; on recompose comme pour NB
+train_rf_final <- cbind(New_Vei = y_rf, X_rf)
+
+# training
+model_rf <- ranger(
+  New_Vei ~ ., data = as.data.frame(train_rf_final),
+  num.trees = 500,
+  importance = "impurity",
+  probability = TRUE,
+  seed = 42
 )
 
+# --- Predictions (mêmes noms d'objets que NB) ---
+new_X_rf <- eruption_summary_vei7_stats[, X_mean_sd_cols, drop = FALSE]
+ok <- complete.cases(new_X_rf)  # pour éviter les NA à la prédiction
+eruption_ids <- eruption_summary_vei7_stats$Eruption[ok]
+new_X_rf_ok <- new_X_rf[ok, , drop = FALSE]
 
-probs_vei7_rf <- predict(model_rf, newdata = eruption_summary_vei7_stats[, X_mean_sd_cols], type = "prob")
-pred_classes_vei7_rf <- predict(model_rf, newdata = eruption_summary_vei7_stats[, X_mean_sd_cols], type = "response")
+pred_rf <- predict(model_rf, data = as.data.frame(new_X_rf_ok))
 
+# Probabilités: data.frame, colonnes "1","2","3",...
+probs_vei7_rf <- as.data.frame(pred_rf$predictions, check.names = FALSE)
+colnames(probs_vei7_rf) <- as.character(seq_len(ncol(probs_vei7_rf)))
 
+# Classe prédite (argmax)
+pred_classes_vei7_rf <- colnames(probs_vei7_rf)[max.col(probs_vei7_rf, ties.method = "first")]
+
+# results (même structure que NB)
 result_vei7_rf <- cbind(
-  Eruption = eruption_summary_vei7_stats$Eruption,
+  Eruption = eruption_ids,
   Predicted_Class = pred_classes_vei7_rf,
   probs_vei7_rf
 )
 
-
 print(result_vei7_rf)
+
 ```
 
 
@@ -1670,6 +1693,42 @@ print(result_vei7_polr)
 
 ```
 
+# orf
+
+```{r}
+
+library(ordinalForest)
+library(dplyr)
+library(tibble)
+
+## --- (A) Recompute a clean prediction ---
+pred_orf <- predict(model_orf, newdata = as.data.frame(test_orf))
+
+## Sanity checks (must be TRUE / FALSE as below)
+print(class(pred_orf))                      # should be "ordforpred"
+print(is.matrix(pred_orf$classprobs))       # should be TRUE
+print(is.vector(pred_orf$ypred) || is.factor(pred_orf$ypred))  # should be TRUE
+
+## --- (B) Extract flat objects ONLY ---
+pred_orf_vec <- as.character(pred_orf$ypred)
+
+probs_orf_df <- as.data.frame(pred_orf$classprobs, check.names = FALSE)
+colnames(probs_orf_df) <- as.character(seq_len(ncol(probs_orf_df)))  # "1","2","..."
+
+probs_orf_df <- probs_orf_df[, as.character(1:6), drop = FALSE]
+
+## --- (C) Build result: DO NOT include `pred_orf` anywhere ---
+result_orf_aug <- bind_cols(
+  tibble(
+    Eruption        = eruption_ids,           # aligné avec test_orf[ok, ]
+    Predicted_Class = pred_orf_vec
+  ),
+  probs_orf_df
+)
+
+print(result_orf_aug)
+
+```
 
 
 
@@ -1723,28 +1782,28 @@ ggplot(df_all, aes(x = Eruption, y = Predicted_VEI, color = Model)) +
 ```
 
 
-all models
+# all models avo 
 
 ```{r}
 library(dplyr)
 library(ggplot2)
 
-vei_levels <- as.character(0:7)
+vei_levels <- as.character(1:7)
 
 # Naive Bayes
 df_nb <- data.frame(
   Eruption = eruption_summary_vei7_stats$Eruption,
   Predicted_VEI = pred_classes_vei7_nb,
   probs_vei7_nb,
-  Model = "Naive Bayes"
+  Model = "NB"
 )
 
 # Random Forest
 df_rf <- data.frame(
   Eruption = eruption_summary_vei7_stats$Eruption,
-  Predicted_VEI = pred_classes_vei7_rf,
+  Predicted_VEI = pred_cls_rf,
   probs_vei7_rf,
-  Model = "Random Forest"
+  Model = "RF"
 )
 
 # LDA
@@ -1771,7 +1830,16 @@ df_polr <- data.frame(
   Model = "POLR"
 )
 
-dfs_all <- list(df_nb, df_rf, df_lda, df_svm, df_polr)
+# ORF
+
+df_orf <- data.frame(
+  Eruption = eruption_summary_vei7_stats$Eruption,
+  Predicted_VEI = pred_orf_vec,
+  probs_orf_df,
+  Model = "ORF"
+)
+
+dfs_all <- list(df_nb, df_rf, df_lda, df_svm, df_polr, df_orf)
 
 dfs_all <- lapply(dfs_all, function(df) {
   df$Predicted_VEI <- factor(df$Predicted_VEI, levels = vei_levels, ordered = TRUE)
@@ -1783,11 +1851,12 @@ df_all <- bind_rows(dfs_all)
 df_all$Eruption <- factor(df_all$Eruption, levels = unique(df_all$Eruption))
 
 model_colors <- c(
-  "Naive Bayes" = "steelblue",
-  "Random Forest" = "darkorange",
+  "NB" = "steelblue",
+  "RF" = "darkorange",
   "LDA" = "seagreen",
   "SVM" = "firebrick",
-  "POLR" = "purple"
+  "POLR" = "purple",
+  "ORF" = "blue"
 )
 
 ggplot(df_all, aes(x = Eruption, y = Predicted_VEI, color = Model)) +
@@ -1874,28 +1943,55 @@ print(result_vei7_nb_aug)
 
 ```{r}
 
+library(dplyr)
+library(tidyr)
+library(ranger)
 
-library(randomForest)
+# --- Data prep (concise) ---
+safe_features <- intersect(X_mean_sd_cols, colnames(eruption_summary_oxides_vei_volcano))
 
-model_rf_aug <- randomForest(
-  x = train_augmented[, X_mean_sd_cols],
-  y = train_augmented$New_Vei,
-  ntree = 500,
-  importance = TRUE
+vei7_to_add <- eruption_summary_vei7_stats %>%
+  dplyr::filter(Eruption %in% c("Crater Lake 5750 BCE", "Santorini 1600 BCE", "Rinjani 1257")) %>%
+  mutate(New_Vei = 7)
+
+train_augmented <- eruption_summary_oxides_vei_volcano %>%
+  dplyr::filter(New_Vei %in% 1:7) %>%
+  bind_rows(vei7_to_add) %>%
+  dplyr::select(New_Vei, all_of(safe_features)) %>%
+  drop_na() %>%
+  mutate(New_Vei = factor(New_Vei, levels = as.character(1:7)))
+
+vei7_holdout_clean <- eruption_summary_vei7_stats %>%
+  dplyr::filter(!Eruption %in% c("Crater Lake 5750 BCE", "Santorini 1600 BCE", "Rinjani 1257")) %>%
+  dplyr::select(Eruption, all_of(safe_features)) %>%
+  drop_na()
+
+# --- Train ---
+rf_formula <- as.formula(paste("New_Vei ~", paste(safe_features, collapse = " + ")))
+model_rf_aug <- ranger(
+  rf_formula, data = train_augmented,
+  num.trees = 500, probability = TRUE, importance = "permutation", seed = 42
 )
 
+# --- Predict ---
+pred_rf <- predict(model_rf_aug, data = dplyr::select(vei7_holdout_clean, all_of(safe_features)))
+probs_rf_aug <- as.data.frame(pred_rf$predictions, check.names = FALSE)
 
-probs_rf_aug <- predict(model_rf_aug, newdata = vei7_holdout[, X_mean_sd_cols], type = "prob")
-pred_rf_aug <- predict(model_rf_aug, newdata = vei7_holdout[, X_mean_sd_cols], type = "response")
+# noms simples 1,2,3,...
+colnames(probs_rf_aug) <- levels(train_augmented$New_Vei)
 
+# classe gagnante
+pred_rf_aug <- colnames(probs_rf_aug)[max.col(probs_rf_aug, "first")]
 
-result_rf_aug <- cbind(
-  Eruption = vei7_holdout$Eruption,
-  Predicted_Class = pred_rf_aug,
+# --- Résultat ---
+result_rf_aug <- bind_cols(
+  vei7_holdout_clean %>% dplyr::select(Eruption),
+  tibble(Predicted_Class = factor(pred_rf_aug, levels = levels(train_augmented$New_Vei), ordered = TRUE)),
   probs_rf_aug
 )
 
 print(result_rf_aug)
+
 
 ```
 lda
@@ -1966,6 +2062,57 @@ print(result_polr_aug)
 
 ```
 
+# orf
+
+```{r}
+library(ordinalForest)
+library(dplyr)
+library(tibble)
+
+# --- Train (ordered target; drop NA rows) ---
+train_orf <- train_augmented %>%
+  dplyr::select(New_Vei, dplyr::all_of(X_mean_sd_cols)) %>%
+  mutate(New_Vei = factor(New_Vei, ordered = TRUE)) %>%
+  dplyr::filter(complete.cases(.))
+
+
+model_orf <- ordfor(
+  depvar       = "New_Vei",
+  data         = as.data.frame(train_orf),
+  nsets        = 1000,
+  ntreeperdiv  = 100,
+  ntreefinal   = 500,
+  perffunction = "probability"
+)
+
+# --- Test set ---
+test_orf <- vei7_holdout %>%
+  dplyr::select(Eruption, dplyr::all_of(X_mean_sd_cols))
+
+ok <- complete.cases(test_orf[, X_mean_sd_cols])
+eruption_ids <- test_orf$Eruption[ok]
+X_test <- test_orf[ok, X_mean_sd_cols, drop = FALSE]
+
+# --- Predictions ---
+pred <- predict(model_orf, newdata = as.data.frame(X_test))
+
+# Probabilities (data.frame with colnames "1","2",...)
+probs_orf_aug <- as.data.frame(pred$classprobs, check.names = FALSE)
+colnames(probs_orf_aug) <- as.character(seq_len(ncol(probs_orf_aug)))
+
+# Predicted class
+pred_orf_aug <- as.character(pred$ypred)
+
+# --- Final result ---
+result_orf_aug <- cbind(
+  Eruption = eruption_ids,
+  Predicted_Class = pred_orf_aug,
+  probs_orf_aug
+)
+
+print(result_orf_aug)
+
+```
 
 # graph for rf and nb ((with vei 7 in training set)
 
@@ -2032,7 +2179,7 @@ df_nb <- data.frame(
   Eruption = vei7_holdout$Eruption[complete.cases(X_pred_nb)],
   Predicted_VEI = pred_nb_aug,
   probs_nb_aug,
-  Model = "Naive Bayes"
+  Model = "NB"
 )
 
 # Random Forest
@@ -2040,7 +2187,7 @@ df_rf <- data.frame(
   Eruption = vei7_holdout$Eruption,
   Predicted_VEI = pred_rf_aug,
   probs_rf_aug,
-  Model = "Random Forest"
+  Model = "RF"
 )
 
 # LDA
@@ -2067,8 +2214,18 @@ df_polr <- data.frame(
   Model = "POLR"
 )
 
+
+# ORF
+df_orf <- data.frame(
+  Eruption = vei7_holdout$Eruption,
+  Predicted_VEI = pred_orf_aug,
+  probs_orf_aug,
+  Model = "ORF"
+)
+
+
 # Lister tous les df
-dfs <- list(df_nb, df_rf, df_lda, df_svm, df_polr)
+dfs <- list(df_nb, df_rf, df_lda, df_svm, df_polr, df_orf)
 
 # Appliquer nettoyage : VEI ordonné + max proba
 vei_levels <- as.character(0:7)
@@ -2088,11 +2245,12 @@ df_all$Eruption <- factor(df_all$Eruption, levels = unique(df_all$Eruption))
 
 # Couleurs personnalisées
 model_colors <- c(
-  "Naive Bayes" = "steelblue",
-  "Random Forest" = "darkorange",
+  "NB" = "steelblue",
+  "RF" = "darkorange",
   "LDA" = "seagreen",
   "SVM" = "firebrick",
-  "POLR" = "purple"
+  "POLR" = "purple",
+  "ORF" = "blue"
 )
 
 # Tracé principal
