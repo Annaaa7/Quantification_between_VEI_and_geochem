@@ -1710,34 +1710,6 @@ print(result_vei7_nb_aug)
 rf
 
 ```{r}
-
-
-library(ranger)
-
-model_rf_aug <- ranger(
-  x = train_augmented[, X_sd_cols],
-  y = train_augmented$New_Vei,
-  ntree = 500,
-  importance = TRUE
-)
-
-
-probs_rf_aug <- predict(model_rf_aug, newdata = vei7_holdout[, X_sd_cols], type = "prob")
-pred_rf_aug <- predict(model_rf_aug, newdata = vei7_holdout[, X_sd_cols], type = "response")
-
-
-result_rf_aug <- cbind(
-  Eruption = vei7_holdout$Eruption,
-  Predicted_Class = pred_rf_aug,
-  probs_rf_aug
-)
-
-print(result_rf_aug)
-
-
-
-
-
 library(dplyr)
 library(tidyr)
 library(ranger)
