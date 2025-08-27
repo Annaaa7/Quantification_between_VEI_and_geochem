@@ -271,8 +271,8 @@ compute_costs <- function(true_y, class_labels, prob_matrix) {
       p_ij <- prob_matrix[i, j]
       diff <- y_i - y_j
 
-      C_abs <- C_abs + abs(diff) * p_ij
-      C_sq  <- C_sq  + (diff^2) * p_ij
+      C_abs  <- C_abs  + abs(diff)  * p_ij
+      C_sq   <- C_sq   + (diff^2)   * p_ij
       C_asym <- C_asym + ifelse(
         diff <= 0,
         (diff^2) * p_ij,
@@ -282,26 +282,30 @@ compute_costs <- function(true_y, class_labels, prob_matrix) {
   }
 
   list(
-    C_absolute = C_abs,
-    C_squared = C_sq,
-    C_asymmetric = C_asym
+    C_absolute   = C_abs / n,   # moyenne absolue (MAE probabiliste)
+    C_squared    = C_sq  / n,   # moyenne quadratique (MSE probabiliste)
+    C_asymmetric = C_asym / n   # moyenne asymétrique
   )
 }
+
 
 
 # function for weighted accuracy 
 compute_weighted_accuracy <- function(pred, true) {
   class_levels <- levels(true)
-  D <- length(class_levels)
-  weights <- rep(1/D, D)  # égal pour chaque classe
+  present <- sapply(class_levels, function(cl) any(true == cl))
+  weights <- rep(0, length(class_levels))
+  weights[present] <- 1 / sum(present)   # poids normalisés uniquement sur classes présentes
+
   accs <- sapply(class_levels, function(cl) {
     in_class <- which(true == cl)
     if (length(in_class) == 0) return(0)
     mean(as.character(pred[in_class]) == as.character(true[in_class]))
-
   })
+
   sum(weights * accs)
 }
+
 
 ```
 

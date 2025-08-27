@@ -572,8 +572,8 @@ compute_costs <- function(true_y, class_labels, prob_matrix) {
       p_ij <- prob_matrix[i, j]
       diff <- y_i - y_j
 
-      C_abs <- C_abs + abs(diff) * p_ij
-      C_sq  <- C_sq  + (diff^2) * p_ij
+      C_abs  <- C_abs  + abs(diff)  * p_ij
+      C_sq   <- C_sq   + (diff^2)   * p_ij
       C_asym <- C_asym + ifelse(
         diff <= 0,
         (diff^2) * p_ij,
@@ -583,26 +583,30 @@ compute_costs <- function(true_y, class_labels, prob_matrix) {
   }
 
   list(
-    C_absolute = C_abs,
-    C_squared = C_sq,
-    C_asymmetric = C_asym
+    C_absolute   = C_abs / n,   # moyenne absolue (MAE probabiliste)
+    C_squared    = C_sq / n,   # moyenne quadratique (MSE probabiliste)
+    C_asymmetric = C_asym / n   # moyenne asymétrique
   )
 }
+
 
 
 # function for weighted accuracy 
 compute_weighted_accuracy <- function(pred, true) {
   class_levels <- levels(true)
-  D <- length(class_levels)
-  weights <- rep(1/D, D)  # égal pour chaque classe
+  present <- sapply(class_levels, function(cl) any(true == cl))
+  weights <- rep(0, length(class_levels))
+  weights[present] <- 1 / sum(present)   # poids normalisés uniquement sur classes présentes
+
   accs <- sapply(class_levels, function(cl) {
     in_class <- which(true == cl)
     if (length(in_class) == 0) return(0)
     mean(as.character(pred[in_class]) == as.character(true[in_class]))
-
   })
+
   sum(weights * accs)
 }
+
 
 ```
 
@@ -821,7 +825,7 @@ results_rf_df <- bind_rows(results_rf)
 # print
 print(results_rf_df)
 
-mean(results_rf_df$Weighted_Accuracy) #0.4553746
+#mean(results_rf_df$Weighted_Accuracy) #0.4553746
 
 
 ```
@@ -984,82 +988,84 @@ for (split in all_splits_summary) {
 results_orf_df <- bind_rows(results_orf)
 
 # 12. Print
-#print(results_orf_df) it takes too long to show idk why
+print(results_orf_df) #it takes too long to show idk why
 
 
-mean(results_orf_df$Weighted_Accuracy) # 0.4436281
+#mean(results_orf_df$Weighted_Accuracy) # 0.4436281
 
 
 ```
 
 
 
-POLR
+POLR 
+
+update 21/08/25 : had to modify this code idk why
 
 ```{r}
 ## to delete if using only one split and fold
 
-results_polr <- list()  # liste pour stocker tous les résultats
+results_polr <- list()
+failed_polr  <- data.frame(Rep=integer(), Fold=integer(), reason=character(), stringsAsFactors = FALSE)
 
 for (split in all_splits_summary) {
   train <- split$train
   test  <- split$test
-  
-  train$New_Vei <- as.factor(train$New_Vei)
-  test$New_Vei  <- as.factor(test$New_Vei)
-  
-  if (length(unique(train$New_Vei)) < 3 || any(table(train$New_Vei) < 3)) next # if theres less than 3 classes, skip the split
 
-  
-# 1. Build formula using previously defined X_mean_cols
-polr_formula <- as.formula(paste("New_Vei ~", paste(X_mean_sd_cols, collapse = " + ")))
+  # Réponse ordonnée et niveaux cohérents
+  train$New_Vei <- factor(train$New_Vei, ordered = TRUE)
+  test$New_Vei  <- factor(test$New_Vei,  levels = levels(train$New_Vei), ordered = TRUE)
 
-# 2. Ensure New_Vei is an ordered factor
-train$New_Vei <- factor(train$New_Vei, ordered = TRUE)
-test$New_Vei  <- factor(test$New_Vei, ordered = TRUE, levels = levels(train$New_Vei))
+  # Skip si trop peu de classes/eff. faibles
+  if (length(levels(train$New_Vei)) < 3 || any(table(train$New_Vei) < 3)) next
 
-# 3. Train the POLR model
-polr_model <- polr(polr_formula, data = train)
+  # Formule (ou tes colonnes nettoyées)
+  polr_formula <- as.formula(paste("New_Vei ~", paste(X_mean_sd_cols, collapse = " + ")))
 
-# 4. Predict class probabilities on test set
-probs_polr <- predict(polr_model, newdata = test, type = "probs")  # rows = obs, cols = class probs
+  fit <- tryCatch(
+    MASS::polr(polr_formula, data = train, method = "logistic",
+               Hess = TRUE, control = list(maxit = 200)),
+    error = function(e) {
+      failed_polr[nrow(failed_polr)+1,] <<- list(split$rep, split$fold, conditionMessage(e))
+      return(NULL)
+    }
+  )
 
-# 5. Convert true labels and class labels to numeric
-true_y_polr <- as.numeric(as.character(test$New_Vei))                  # true labels
-class_labels_polr <- as.numeric(colnames(probs_polr))                 # predicted class labels
+  if (is.null(fit)) next  # on saute ce split et on continue la boucle
 
-# 6. Compute probabilistic cost metrics
-costs_polr <- compute_costs(true_y_polr, class_labels_polr, probs_polr)
+  # --- suite normale : probs, coûts, préd, accuracy ---
+  probs_polr <- predict(fit, newdata = test, type = "probs")
+  levs <- levels(train$New_Vei)
+  true_y  <- as.integer(test$New_Vei)
+  classes <- seq_along(levs)
 
-# 7. Get predicted classes (argmax of probabilities)
-pred_classes_polr <- as.numeric(colnames(probs_polr)[max.col(probs_polr)])
+  costs <- compute_costs(true_y, classes, probs_polr)
+  pred  <- factor(levs[max.col(probs_polr)], levels = levs, ordered = TRUE)
+  wa    <- compute_weighted_accuracy(pred, factor(test$New_Vei, levels = levs, ordered = TRUE))
 
-# 8. Convert to factors for weighted accuracy
-pred_classes_polr <- factor(pred_classes_polr, levels = sort(unique(true_y_polr)))
-true_y_factor_polr <- factor(true_y_polr, levels = sort(unique(true_y_polr)))
-
-# 9. Compute weighted accuracy
-weighted_acc_polr <- compute_weighted_accuracy(pred_classes_polr, true_y_factor_polr)
-
-
-# Store results for this split
   results_polr[[length(results_polr) + 1]] <- data.frame(
-    Rep = split$rep,
-    Fold = split$fold,
-    C_absolute = costs_polr$C_absolute,
-    C_squared = costs_polr$C_squared,
-    C_asymmetric = costs_polr$C_asymmetric,
-    Weighted_Accuracy = weighted_acc_polr
+    Rep = split$rep, Fold = split$fold,
+    C_absolute = costs$C_absolute, C_squared = costs$C_squared,
+    C_asymmetric = costs$C_asymmetric, Weighted_Accuracy = wa
   )
 }
 
-# Fusionner tous les résultats en un seul data.frame
-results_polr_df <- bind_rows(results_polr)
+# Récap
+ok_n   <- length(results_polr)
+tot_n  <- length(all_splits_summary)
+cat(ok_n, "splits ont réussi sur", tot_n, "\n")
 
-# print
+if (nrow(failed_polr)) {
+  message("Splits échoués :")
+  print(failed_polr)
+}
+
+# Tout en un seul data.frame
+results_polr_df <- if (ok_n) do.call(rbind, results_polr) else data.frame()
+
 print(results_polr_df)
 
-mean(results_polr_df$Weighted_Accuracy) # 0.3826531
+#mean(results_polr_df$Weighted_Accuracy) # 0.3826531
 
 ```
 
