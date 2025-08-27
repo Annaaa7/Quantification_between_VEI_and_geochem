@@ -1073,6 +1073,30 @@ avo_filtered <- avo_filtered %>%
 
 
 
+```{r}
+new_new_eruption_summary_normal <- avo_filtered %>%
+  group_by(Eruption) %>%
+  summarise(
+    VEI = unique(VEI)[1],
+    `Eruption date` = unique(`Eruption date`),  # ici on suppose 1 date par éruption
+    n_samples = n()
+    #.groups = "drop"
+  )
+
+
+ggplot(data = new_new_eruption_summary_normal %>% dplyr::filter(!is.na(VEI)), aes(x = as.factor(VEI))) +
+  geom_bar(fill = "skyblue", color = "black") +
+  geom_text(stat = "count", aes(label = ..count..), vjust = -0.5, size = 4) +
+  labs(title = "Number of eruption by VEI level",
+       x = "VEI", y = "Nb of eruptions") +
+  theme_minimal()
+
+
+
+
+```
+
+
 
 
 
