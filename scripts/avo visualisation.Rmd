@@ -137,8 +137,8 @@ ggplot(avo_filtered_long, aes(x = SiO2, y = Total_Alkalis, color = as.factor(VEI
   theme_minimal() +
   labs(
     title = "TAS Diagram : VEI of avo_filtered",
-    x = "SiO₂ (%)",
-    y = "Na₂O + K₂O (%)",
+    x = expression(SiO[2]~"(%)"),
+    y = expression(Na[2]*O + K[2]*O~"(%)"),
     color = "VEI"
   )
 
@@ -164,8 +164,8 @@ ggplot(avo_filtered_long, aes(x = SiO2, y = Total_Alkalis, color = Rock_Type)) +
   theme_minimal() +
   labs(
     title = "TAS Diagram : Dominant Rock Type of avo_filtered",
-    x = "SiO₂ (%)",
-    y = "Na₂O + K₂O (%)",
+    x = expression(SiO[2]~"(%)"),
+    y = expression(Na[2]*O + K[2]*O~"(%)"),
     color = "Dominant Rock Type"
   )
 
@@ -200,8 +200,8 @@ ggplot(avo_filtered_long2, aes(x = SiO2, y = Total_Alkalis, color = Volcano_Type
   theme_minimal() +
   labs(
     title = "TAS Diagram : Primary Volcano Type",
-    x = "SiO₂ (%)",
-    y = "Na₂O + K₂O (%)",
+    x = expression(SiO[2]~"(%)"),
+    y = expression(Na[2]*O + K[2]*O~"(%)"),
     color = "Volcano Type"
   )
 
