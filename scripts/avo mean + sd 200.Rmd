@@ -1003,56 +1003,82 @@ POLR
 update 21/08/25 : had to modify this code idk why
 
 ```{r}
-## to delete if using only one split and fold
 
+
+library(MASS)
+library(dplyr)
+
+## to delete if using only one split and fold
 results_polr <- list()
-failed_polr  <- data.frame(Rep=integer(), Fold=integer(), reason=character(), stringsAsFactors = FALSE)
+failed_polr  <- data.frame(
+  Rep = integer(),
+  Fold = integer(),
+  reason = character(),
+  stringsAsFactors = FALSE
+)
 
 for (split in all_splits_summary) {
   train <- split$train
   test  <- split$test
 
-  # Réponse ordonnée et niveaux cohérents
+  # Ensure ordered response and aligned levels
   train$New_Vei <- factor(train$New_Vei, ordered = TRUE)
-  test$New_Vei  <- factor(test$New_Vei,  levels = levels(train$New_Vei), ordered = TRUE)
+  test$New_Vei  <- factor(test$New_Vei, levels = levels(train$New_Vei), ordered = TRUE)
 
-  # Skip si trop peu de classes/eff. faibles
-  if (length(levels(train$New_Vei)) < 3 || any(table(train$New_Vei) < 3)) next
+  # Skip split if too few classes or any level count < 3
+  if (length(levels(train$New_Vei)) < 3 || any(table(train$New_Vei) < 3)) {
+    failed_polr[nrow(failed_polr) + 1, ] <- list(split$rep, split$fold, "too few classes or counts < 3")
+    next
+  }
 
-  # Formule (ou tes colonnes nettoyées)
+
   polr_formula <- as.formula(paste("New_Vei ~", paste(X_mean_sd_cols, collapse = " + ")))
 
-  fit <- tryCatch(
-    MASS::polr(polr_formula, data = train, method = "logistic",
-               Hess = TRUE, control = list(maxit = 200)),
+  polr_model <- tryCatch(
+    MASS::polr(polr_formula, data = train),
     error = function(e) {
-      failed_polr[nrow(failed_polr)+1,] <<- list(split$rep, split$fold, conditionMessage(e))
+      failed_polr[nrow(failed_polr) + 1, ] <<- list(split$rep, split$fold, conditionMessage(e))
       return(NULL)
     }
   )
+  if (is.null(polr_model)) next  # skip this split
 
-  if (is.null(fit)) next  # on saute ce split et on continue la boucle
+  # Predict class probabilities on test set
+  probs_polr <- tryCatch(
+    predict(polr_model, newdata = test, type = "probs"),
+    error = function(e) {
+      failed_polr[nrow(failed_polr) + 1, ] <<- list(split$rep, split$fold, paste("predict error:", conditionMessage(e)))
+      return(NULL)
+    }
+  )
+  if (is.null(probs_polr)) next
 
-  # --- suite normale : probs, coûts, préd, accuracy ---
-  probs_polr <- predict(fit, newdata = test, type = "probs")
-  levs <- levels(train$New_Vei)
-  true_y  <- as.integer(test$New_Vei)
+  # Prepare labels and classes
+  levs    <- levels(train$New_Vei)
+  true_y  <- as.integer(test$New_Vei)      
   classes <- seq_along(levs)
 
+  # Compute costs/metrics 
   costs <- compute_costs(true_y, classes, probs_polr)
-  pred  <- factor(levs[max.col(probs_polr)], levels = levs, ordered = TRUE)
+
+  
+  pred  <- factor(levs[max.col(probs_polr, ties.method = "first")], levels = levs, ordered = TRUE)
   wa    <- compute_weighted_accuracy(pred, factor(test$New_Vei, levels = levs, ordered = TRUE))
 
+  # Store results for this split
   results_polr[[length(results_polr) + 1]] <- data.frame(
-    Rep = split$rep, Fold = split$fold,
-    C_absolute = costs$C_absolute, C_squared = costs$C_squared,
-    C_asymmetric = costs$C_asymmetric, Weighted_Accuracy = wa
+    Rep = split$rep,
+    Fold = split$fold,
+    C_absolute = costs$C_absolute,
+    C_squared = costs$C_squared,
+    C_asymmetric = costs$C_asymmetric,
+    Weighted_Accuracy = wa
   )
 }
 
-# Récap
-ok_n   <- length(results_polr)
-tot_n  <- length(all_splits_summary)
+# Recap
+ok_n  <- length(results_polr)
+tot_n <- length(all_splits_summary)
 cat(ok_n, "splits ont réussi sur", tot_n, "\n")
 
 if (nrow(failed_polr)) {
@@ -1060,12 +1086,10 @@ if (nrow(failed_polr)) {
   print(failed_polr)
 }
 
-# Tout en un seul data.frame
-results_polr_df <- if (ok_n) do.call(rbind, results_polr) else data.frame()
-
+# Bind all successful results
+results_polr_df <- if (ok_n) dplyr::bind_rows(results_polr) else data.frame()
 print(results_polr_df)
 
-#mean(results_polr_df$Weighted_Accuracy) # 0.3826531
 
 ```
 
@@ -1115,82 +1139,21 @@ print(results_mean_sd_df)
 
 
 
-visual graph of the table above
+# visual graph of the table above
 
 
+# all models 
 
-only with nb and rf
+# facettes
+
 ```{r}
-# filter the data with New_Vei
-df_true <- eruption_summary_oxides_vei_volcano %>%
-  dplyr::filter(New_Vei %in% 1:6) %>%
-  dplyr::select(Eruption, New_Vei, all_of(X_mean_sd_cols)) %>%
-  mutate(Expected_VEI = New_Vei)  # pour clarté
-
-# delete nas
-df_true <- df_true[complete.cases(df_true[, X_mean_sd_cols]), ]
+library(dplyr)
+library(ggplot2)
 
 
-
-
-# predict with NB on avo
 X_nb <- df_true[, X_mean_sd_cols]
 pred_nb <- predict(nb_model, newdata = X_nb)
 
-# create df from results
-df_nb_pred <- df_true %>%
-  dplyr::select(Eruption, Expected_VEI) %>%
-  mutate(
-    Predicted_VEI = pred_nb,
-    Model = "Naive Bayes"
-  )
-
-
-
-
-# predict rf on avo
-pred_rf <- predict(rf_model, data = X_nb)  # same X bc same base
- # probability matrix: n rows x d class columns
-pred_vei_rf <- as.data.frame(pred_rf[["predictions"]])
-pred_vei_rf$pred_vei <- names(pred_vei_rf)[max.col(pred_vei_rf)]
-
-df_rf_pred <- df_true %>%
-  dplyr::select(Eruption, Expected_VEI) %>%
-  mutate(
-    Predicted_VEI = pred_vei_rf$pred_vei,
-    Model = "Random Forest"
-  )
-
-
-
-df_all_preds <- bind_rows(df_nb_pred, df_rf_pred)
-
-
-vei_levels <- as.character(0:7)
-
-df_all_preds$Expected_VEI <- factor(df_all_preds$Expected_VEI, levels = vei_levels, ordered = TRUE)
-df_all_preds$Predicted_VEI <- factor(df_all_preds$Predicted_VEI, levels = vei_levels, ordered = TRUE)
-
-ggplot(df_all_preds, aes(x = Expected_VEI, y = Predicted_VEI, color = Model)) +
-  geom_jitter(width = 0.2, height = 0.2, size = 3.5, alpha = 0.7) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
-  theme_minimal() +
-  labs(
-    title = "Expected vs Predicted VEI (AVO)",
-    x = "Expected VEI",
-    y = "Predicted VEI"
-  ) +
-  scale_color_manual(values = c("Naive Bayes" = "steelblue", "Random Forest" = "darkorange")) +
-  scale_x_discrete(drop = FALSE) +
-  scale_y_discrete(drop = FALSE)
-
-
-
-```
-
-
-# all models for avo
-```{r}
 # filter the data with New_Vei
 df_true <- eruption_summary_oxides_vei_volcano %>%
   dplyr::filter(New_Vei %in% 1:6) %>%
@@ -1211,9 +1174,7 @@ df_lda_pred <- df_true %>%
     Model = "LDA"
   )
 
-# predict with NB on avo
-X_nb <- df_true[, X_mean_sd_cols]
-pred_nb <- predict(nb_model, newdata = X_nb)
+
 
 # create df from results
 df_nb_pred <- df_true %>%
@@ -1226,7 +1187,7 @@ df_nb_pred <- df_true %>%
 
 
 
-# predict rf on avo
+# predict rf 
 pred_rf <- predict(rf_model, data = X_nb)  # same X bc same base
  # probability matrix: n rows x d class columns
 pred_vei_rf <- as.data.frame(pred_rf[["predictions"]])
@@ -1252,9 +1213,6 @@ df_svm_pred <- df_true %>%
   )
 
 
-
-
-
 # predict polr
 pred_polr <- predict(polr_model, newdata = X_nb)
 
@@ -1277,7 +1235,6 @@ df_orf_pred <- df_true %>%
   )
 
 
-library(ggplot2)
 
 # Combine all predictions
 df_all_preds <- bind_rows(
@@ -1288,46 +1245,6 @@ df_all_preds <- bind_rows(
   df_polr_pred,
   df_orf_pred
 )
-
-vei_levels <- as.character(0:7)
-
-df_all_preds <- df_all_preds %>%
-  mutate(
-    Expected_VEI = factor(Expected_VEI, levels = vei_levels, ordered = TRUE),
-    Predicted_VEI = factor(Predicted_VEI, levels = vei_levels, ordered = TRUE)
-  )
-
-model_colors <- c(
-  "Naive Bayes"   = "steelblue",
-  "Random Forest" = "darkorange",
-  "LDA"           = "darkgreen",
-  "SVM"           = "purple",
-  "POLR"          = "pink",
-  "ORF"           = "darkred"
-)
-
-# Graphique
-ggplot(df_all_preds, aes(x = Expected_VEI, y = Predicted_VEI, color = Model)) +
-  geom_jitter(width = 0.2, height = 0.2, size = 3.5, alpha = 0.7) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
-  theme_minimal() +
-  labs(
-    title = "Expected vs Predicted VEI (AVO)",
-    x = "Expected VEI",
-    y = "Predicted VEI"
-  ) +
-  scale_color_manual(values = model_colors) +
-  scale_x_discrete(drop = FALSE) +
-  scale_y_discrete(drop = FALSE) +
-  theme(axis.text = element_text(face = "bold"))
-
-```
-
-facettes
-
-```{r}
-library(dplyr)
-library(ggplot2)
 
 # --- Ensure ordered factors ---
 vei_levels <- as.character(1:7)
@@ -1582,8 +1499,8 @@ model_rf <- ranger(
   New_Vei ~ ., data = as.data.frame(train_rf_final),
   num.trees = 500,
   importance = "impurity",
-  probability = TRUE,
-  seed = 42
+  probability = TRUE#,
+  # seed = 42
 )
 
 # --- Predictions (mêmes noms d'objets que NB) ---
@@ -1703,92 +1620,82 @@ print(result_vei7_polr)
 
 ```{r}
 
+# --- ORF training on VEI 1..6 and prediction on VEI-7 ---
+library(dplyr)
 library(ordinalForest)
-library(dplyr)
-library(tibble)
 
-## --- (A) Recompute a clean prediction ---
-pred_orf <- predict(model_orf, newdata = as.data.frame(test_orf))
+# 1) Train set (VEI 1..6 only, ordered factor)
+train_orf <- eruption_summary_oxides_vei_volcano %>%
+  dplyr::filter(New_Vei %in% 1:6) %>%
+  mutate(New_Vei = factor(New_Vei, ordered = TRUE))
 
-## Sanity checks (must be TRUE / FALSE as below)
-print(class(pred_orf))                      # should be "ordforpred"
-print(is.matrix(pred_orf$classprobs))       # should be TRUE
-print(is.vector(pred_orf$ypred) || is.factor(pred_orf$ypred))  # should be TRUE
+# 2) Split into X / y using your predictor list
+X_orf <- train_orf[, X_mean_sd_cols, drop = FALSE]
+y_orf <- train_orf$New_Vei
 
-## --- (B) Extract flat objects ONLY ---
+# 3) Build training frame for ordfor (response + predictors)
+train_orf_full <- data.frame(New_Vei = y_orf, X_orf, check.names = FALSE)
+
+# 4) Fit Ordinal Random Forest (minimal call)
+orf_model <- ordfor(
+  depvar       = "New_Vei",
+  data         = train_orf_full,
+  nsets        = 1000,
+  ntreeperdiv  = 100,
+  ntreefinal   = 500,
+  perffunction = "probability"
+)
+
+# 5) Prepare newdata for prediction (VEI-7 holdout) + safety: numeric + impute
+newdata_orf <- eruption_summary_vei7_stats[, X_mean_sd_cols, drop = FALSE]
+
+to_num <- function(x) if (is.numeric(x)) x else suppressWarnings(as.numeric(as.character(x)))
+newdata_orf <- as.data.frame(newdata_orf)
+newdata_orf[] <- lapply(newdata_orf, to_num)
+
+# mean imputation from TRAIN to keep rows aligned
+train_num <- as.data.frame(train_orf_full[, X_mean_sd_cols, drop = FALSE])
+train_num[] <- lapply(train_num, to_num)
+train_means <- sapply(train_num, function(v) mean(v, na.rm = TRUE))
+for (nm in X_mean_sd_cols) {
+  nas <- is.na(newdata_orf[[nm]])
+  if (any(nas)) newdata_orf[[nm]][nas] <- train_means[[nm]]
+}
+
+# 6) Predict probabilities and classes
+pred_orf <- predict(orf_model, newdata = newdata_orf)
 pred_orf_vec <- as.character(pred_orf$ypred)
-
 probs_orf_df <- as.data.frame(pred_orf$classprobs, check.names = FALSE)
-colnames(probs_orf_df) <- as.character(seq_len(ncol(probs_orf_df)))  # "1","2","..."
 
-probs_orf_df <- probs_orf_df[, as.character(1:6), drop = FALSE]
+# Name probability columns by the learned levels (usually "1".."6")
+levs <- levels(train_orf$New_Vei)
+if (ncol(probs_orf_df) == length(levs)) {
+  colnames(probs_orf_df) <- levs
+} else {
+  colnames(probs_orf_df) <- as.character(seq_len(ncol(probs_orf_df)))
+}
 
-## --- (C) Build result: DO NOT include `pred_orf` anywhere ---
-result_orf_aug <- bind_cols(
-  tibble(
-    Eruption        = eruption_ids,           # aligné avec test_orf[ok, ]
-    Predicted_Class = pred_orf_vec
-  ),
-  probs_orf_df
+# 7) Sanity checks + assemble (keeps "1","2","...","6")
+stopifnot(
+  length(pred_orf_vec) == nrow(newdata_orf),
+  nrow(probs_orf_df)  == nrow(newdata_orf),
+  nrow(newdata_orf)   == nrow(eruption_summary_vei7_stats)
 )
 
-print(result_orf_aug)
+result_vei7_orf <- data.frame(
+  Eruption        = eruption_summary_vei7_stats$Eruption,
+  Predicted_Class = factor(pred_orf_vec, levels = levs, ordered = TRUE),
+  probs_orf_df,
+  check.names     = FALSE
+)
+
+print(result_vei7_orf)
+
 
 ```
 
 
-
-# graph for rf and nb (no vei 7 in training set)
-
-```{r graphique }
-library(dplyr)
-library(ggplot2)
-
-
-# nb
-df_nb <- data.frame(
-  Eruption = eruption_summary_vei7_stats$Eruption,
-  Predicted_VEI = pred_classes_vei7_nb,
-  probs_vei7_nb,
-  Model = "Naive Bayes"
-)
-
-# rf
-df_rf <- data.frame(
-  Eruption = eruption_summary_vei7_stats$Eruption,
-  Predicted_VEI = pred_classes_vei7_rf,
-  probs_vei7_rf,
-  Model = "Random Forest"
-)
-
-# ordered vei
-vei_levels <- as.character(0:7)
-df_nb$Predicted_VEI <- factor(df_nb$Predicted_VEI, levels = vei_levels, ordered = TRUE)
-df_rf$Predicted_VEI <- factor(df_rf$Predicted_VEI, levels = vei_levels, ordered = TRUE)
-
-# mix
-df_all <- bind_rows(df_nb, df_rf)
-df_all$Eruption <- factor(df_all$Eruption, levels = unique(df_all$Eruption))
-
-
-
-
-ggplot(df_all, aes(x = Eruption, y = Predicted_VEI, color = Model)) +
-  geom_point(size = 4, alpha = 0.8, position = position_dodge(width = 0.5)) +
-  theme_minimal() +
-  labs(
-    title = "Predicted VEI for VEI 7 Eruptions (mean + cuberoot(sd))",
-    x = "Eruption",
-    y = "Predicted VEI"
-  ) +
-  scale_y_discrete(limits = vei_levels) +  # 👈 Affiche tous les VEI de 0 à 7
-  scale_color_manual(values = c("Naive Bayes" = "steelblue", "Random Forest" = "darkorange")) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-```
-
-
-# all models avo 
+# graph for all models avo (no vei 7 in training set)
 
 ```{r}
 library(dplyr)
@@ -1807,7 +1714,7 @@ df_nb <- data.frame(
 # Random Forest
 df_rf <- data.frame(
   Eruption = eruption_summary_vei7_stats$Eruption,
-  Predicted_VEI = pred_cls_rf,
+  Predicted_VEI = pred_classes_vei7_rf,
   probs_vei7_rf,
   Model = "RF"
 )
@@ -2120,61 +2027,10 @@ print(result_orf_aug)
 
 ```
 
-# graph for rf and nb ((with vei 7 in training set)
-
-```{r}
-library(dplyr)
-library(ggplot2)
-
-df_nb <- data.frame(
-  Eruption = vei7_holdout$Eruption[complete.cases(X_pred_nb)],
-  Predicted_VEI = pred_nb_aug,
-  probs_nb_aug,
-  Model = "Naive Bayes"
-)
-
-df_rf <- data.frame(
-  Eruption = vei7_holdout$Eruption,
-  Predicted_VEI = pred_rf_aug,
-  probs_rf_aug,
-  Model = "Random Forest"
-)
-
-df_nb <- df_nb %>%
-  rowwise() %>%
-  mutate(Max_Prob = max(c_across(where(is.numeric)))) %>%
-  ungroup()
-
-df_rf <- df_rf %>%
-  rowwise() %>%
-  mutate(Max_Prob = max(c_across(where(is.numeric)))) %>%
-  ungroup()
-
-vei_levels <- as.character(0:7)
-df_nb$Predicted_VEI <- factor(df_nb$Predicted_VEI, levels = vei_levels, ordered = TRUE)
-df_rf$Predicted_VEI <- factor(df_rf$Predicted_VEI, levels = vei_levels, ordered = TRUE)
-
-df_all$Predicted_VEI <- factor(df_all$Predicted_VEI, levels = vei_levels, ordered = TRUE)
-df_all <- bind_rows(df_nb, df_rf)
-df_all$Eruption <- factor(df_all$Eruption, levels = unique(df_all$Eruption))
-
-ggplot(df_all, aes(x = Eruption, y = Predicted_VEI, color = Model)) +
-  geom_point(size = 4, alpha = 0.8, position = position_dodge(width = 0.6)) +
-  theme_minimal() +
-  labs(
-    title = "Predicted VEI for VEI 7 Eruptions (mean + cuberoot(sd))",
-    x = "Eruption",
-    y = "Predicted VEI"
-  ) +
-  scale_y_discrete(limits = vei_levels) + 
-  scale_color_manual(values = c("Naive Bayes" = "steelblue", "Random Forest" = "darkorange")) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 
 
-```
-
-all models
+# all models (vei 7 in train and test)
 
 ```{r}
 library(dplyr)
