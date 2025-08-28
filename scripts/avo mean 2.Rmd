@@ -821,91 +821,22 @@ print(results_means_df)
 
 # graph of the results above
 
+# facettes
 
-## nb and rf
 ```{r}
+library(dplyr)
+library(ggplot2)
 
-df_true <- eruption_summary_oxides_vei_volcano %>%
-  dplyr::filter(New_Vei %in% 1:6) %>%
-  dplyr::select(Eruption, New_Vei, all_of(X_mean_cols)) %>%
-  mutate(Expected_VEI = New_Vei)  # pour clarté
-
-df_true <- df_true[complete.cases(df_true[, X_mean_cols]), ]
-
-X_nb <- df_true[, X_mean_cols]
-pred_nb <- predict(nb_model, newdata = X_nb)
-
-df_nb_pred <- df_true %>%
-  dplyr::select(Eruption, Expected_VEI) %>%
-  mutate(
-    Predicted_VEI = pred_nb,
-    Model = "Naive Bayes"
-  )
-
-pred_rf <- predict(rf_model, data = X_nb)  
- # probability matrix: n rows x d class columns
-pred_vei_rf <- as.data.frame(pred_rf[["predictions"]])
-pred_vei_rf$pred_vei <- names(pred_vei_rf)[max.col(pred_vei_rf)]
-
-
-
-df_rf_pred <- df_true %>%
-  dplyr::select(Eruption, Expected_VEI) %>%
-  mutate(
-    Predicted_VEI = pred_vei_rf$pred_vei,
-    Model = "Random Forest"
-  )
-
-
-df_all_preds <- bind_rows(df_nb_pred, df_rf_pred)
-
-
-vei_levels <- as.character(0:7)
-
-df_all_preds$Expected_VEI <- factor(df_all_preds$Expected_VEI, levels = vei_levels, ordered = TRUE)
-df_all_preds$Predicted_VEI <- factor(df_all_preds$Predicted_VEI, levels = vei_levels, ordered = TRUE)
-
-ggplot(df_all_preds, aes(x = Expected_VEI, y = Predicted_VEI, color = Model)) +
-  geom_jitter(width = 0.2, height = 0.2, size = 3.5, alpha = 0.7) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
-  theme_minimal() +
-  labs(
-    title = "Expected vs Predicted VEI (AVO)",
-    x = "Expected VEI",
-    y = "Predicted VEI"
-  ) +
-  scale_color_manual(values = c("Naive Bayes" = "steelblue", "Random Forest" = "darkorange")) +
-  scale_x_discrete(drop = FALSE) +
-  scale_y_discrete(drop = FALSE)
-
-
-```
-
-# all models
-```{r}
-# filter the data with New_Vei
 df_true <- eruption_summary_oxides_vei_volcano %>%
   dplyr::filter(New_Vei %in% 1:6) %>%
   dplyr::select(Eruption, New_Vei, all_of(X_mean_cols)) %>%
   mutate(Expected_VEI = New_Vei)  
 
-# delete nas
-df_true <- df_true[complete.cases(df_true[, X_mean_cols]), ]
 
-
-# predict lda
-pred_lda <- predict(lda_model, newdata = X_nb)$class
-
-df_lda_pred <- df_true %>%
-  dplyr::select(Eruption, Expected_VEI) %>%
-  mutate(
-    Predicted_VEI = pred_lda,
-    Model = "LDA"
-  )
-
-# predict with NB on avo
 X_nb <- df_true[, X_mean_cols]
 pred_nb <- predict(nb_model, newdata = X_nb)
+
+
 
 # create df from results
 df_nb_pred <- df_true %>%
@@ -916,6 +847,15 @@ df_nb_pred <- df_true %>%
   )
 
 
+
+pred_lda <- predict(lda_model, newdata = X_nb)$class
+
+df_lda_pred <- df_true %>%
+  dplyr::select(Eruption, Expected_VEI) %>%
+  mutate(
+    Predicted_VEI = pred_lda,
+    Model = "LDA"
+  )
 
 
 # predict rf on avo
@@ -969,7 +909,6 @@ df_orf_pred <- df_true %>%
   )
 
 
-library(ggplot2)
 
 # Combine all predictions
 df_all_preds <- bind_rows(
@@ -981,240 +920,6 @@ df_all_preds <- bind_rows(
   df_orf_pred
 )
 
-vei_levels <- as.character(0:7)
-
-df_all_preds <- df_all_preds %>%
-  mutate(
-    Expected_VEI = factor(Expected_VEI, levels = vei_levels, ordered = TRUE),
-    Predicted_VEI = factor(Predicted_VEI, levels = vei_levels, ordered = TRUE)
-  )
-
-model_colors <- c(
-  "Naive Bayes"   = "steelblue",
-  "Random Forest" = "darkorange",
-  "LDA"           = "darkgreen",
-  "SVM"           = "purple",
-  "POLR"          = "pink",
-  "ORF"           = "darkred"
-)
-
-# Graphique
-ggplot(df_all_preds, aes(x = Expected_VEI, y = Predicted_VEI, color = Model)) +
-  geom_jitter(width = 0.2, height = 0.2, size = 3.5, alpha = 0.7) +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
-  theme_minimal() +
-  labs(
-    title = "Expected vs Predicted VEI (AVO)",
-    x = "Expected VEI",
-    y = "Predicted VEI"
-  ) +
-  scale_color_manual(values = model_colors) +
-  scale_x_discrete(drop = FALSE) +
-  scale_y_discrete(drop = FALSE) +
-  theme(axis.text = element_text(face = "bold"))
-
-```
-
-
-same but on two different graphs
-
-```{r}
-library(dplyr)
-library(ggplot2)
-
-# --- Features: one single matrix for all models ---
-X <- df_true[, X_mean_cols]
-
-# --- Predictions (harmonized on X) ---
-pred_lda  <- predict(lda_model,  newdata = X)$class
-pred_nb   <- predict(nb_model,   newdata = X)
-pred_rf   <- predict(rf_model,   data    = X)
-pred_svm  <- predict(svm_model,  newdata = X)
-pred_polr <- predict(polr_model, newdata = X)
-pred_orf  <- predict(orf_model,  newdata = X)
-
-# For RF: retrieve the winning class
-pred_vei_rf <- as.data.frame(pred_rf[["predictions"]])
-pred_vei_rf$pred_vei <- names(pred_vei_rf)[max.col(pred_vei_rf)]
-
-# --- Build output data frames for each model ---
-df_lda_pred  <- df_true %>% select(Eruption, Expected_VEI) %>% mutate(Predicted_VEI = pred_lda,             Model = "LDA")
-df_nb_pred   <- df_true %>% select(Eruption, Expected_VEI) %>% mutate(Predicted_VEI = pred_nb,              Model = "NB")
-df_rf_pred   <- df_true %>% select(Eruption, Expected_VEI) %>% mutate(Predicted_VEI = pred_vei_rf$pred_vei, Model = "RF")
-df_svm_pred  <- df_true %>% select(Eruption, Expected_VEI) %>% mutate(Predicted_VEI = pred_svm,             Model = "SVM")
-df_polr_pred <- df_true %>% select(Eruption, Expected_VEI) %>% mutate(Predicted_VEI = pred_polr,            Model = "POLR")
-df_orf_pred  <- df_true %>% select(Eruption, Expected_VEI) %>% mutate(Predicted_VEI = pred_orf$ypred,       Model = "ORF")
-
-# --- Combine all predictions into one dataset ---
-df_all_preds <- bind_rows(
-  df_nb_pred, df_rf_pred, df_lda_pred, df_svm_pred, df_polr_pred, df_orf_pred
-)
-
-# --- Ensure VEI factors are ordered and consistent ---
-vei_levels <- as.character(0:7)
-df_all_preds <- df_all_preds %>%
-  mutate(
-    Expected_VEI  = factor(Expected_VEI,  levels = vei_levels, ordered = TRUE),
-    Predicted_VEI = factor(Predicted_VEI, levels = vei_levels, ordered = TRUE)
-  )
-
-# --- Color mapping for each model ---
-model_colors <- c(
-  "Naive Bayes"   = "#009E73",
-  "Random Forest" = "#000000",
-  "LDA"           = "orange",
-  "SVM"           = "purple",
-  "POLR"          = "#009E73",
-  "ORF"           = "orange"
-)
-
-# --- Reusable plotting function with higher transparency ---
-plot_ev <- function(df_sub, title_suffix) {
-  ggplot(df_sub, aes(x = Expected_VEI, y = Predicted_VEI, color = Model)) +
-    geom_jitter(width = 0.18, height = 0.18, size = 3.2, alpha = 0.35) +  # higher transparency for overlaps
-    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
-    scale_color_manual(values = model_colors, drop = FALSE) +
-    scale_x_discrete(drop = FALSE) +
-    scale_y_discrete(drop = FALSE) +
-    labs(
-      title = paste("Expected vs Predicted VEI (AVO - Mean) —", title_suffix),
-      x = "Expected VEI", y = "Predicted VEI"
-    ) +
-    theme_minimal() +
-    theme(
-      axis.text = element_text(face = "bold"),
-      legend.position = "bottom"
-    )
-}
-
-# --- Split models into two groups ---
-group1 <- c("NB", "RF", "LDA")
-group2 <- c("SVM", "POLR", "ORF")
-
-# --- Create plots for each group ---
-p1 <- df_all_preds %>% filter(Model %in% group1) %>% plot_ev("NB / RF / LDA")
-p2 <- df_all_preds %>% filter(Model %in% group2) %>% plot_ev("SVM / POLR / ORF")
-
-# Display separately
-p1
-p2
-
-# Option: display side by side using patchwork
-# install.packages("patchwork")
-# library(patchwork)
-# p1 | p2
-
-```
-
-
-with forms
-
-```{r}
-library(dplyr)
-library(ggplot2)
-
-# --- Features: one single matrix for all models ---
-X <- df_true[, X_mean_cols]
-
-# --- Predictions (harmonized on X) ---
-pred_lda  <- predict(lda_model,  newdata = X)$class
-pred_nb   <- predict(nb_model,   newdata = X)
-pred_rf   <- predict(rf_model,   data    = X)
-pred_svm  <- predict(svm_model,  newdata = X)
-pred_polr <- predict(polr_model, newdata = X)
-pred_orf  <- predict(orf_model,  newdata = X)
-
-# For RF: retrieve the winning class
-pred_vei_rf <- as.data.frame(pred_rf[["predictions"]])
-pred_vei_rf$pred_vei <- names(pred_vei_rf)[max.col(pred_vei_rf)]
-
-# --- Build output data frames for each model ---
-df_lda_pred  <- df_true %>% select(Eruption, Expected_VEI) %>% mutate(Predicted_VEI = pred_lda,             Model = "LDA")
-df_nb_pred   <- df_true %>% select(Eruption, Expected_VEI) %>% mutate(Predicted_VEI = pred_nb,              Model = "Naive Bayes")
-df_rf_pred   <- df_true %>% select(Eruption, Expected_VEI) %>% mutate(Predicted_VEI = pred_vei_rf$pred_vei, Model = "Random Forest")
-df_svm_pred  <- df_true %>% select(Eruption, Expected_VEI) %>% mutate(Predicted_VEI = pred_svm,             Model = "SVM")
-df_polr_pred <- df_true %>% select(Eruption, Expected_VEI) %>% mutate(Predicted_VEI = pred_polr,            Model = "POLR")
-df_orf_pred  <- df_true %>% select(Eruption, Expected_VEI) %>% mutate(Predicted_VEI = pred_orf$ypred,       Model = "ORF")
-
-# --- Combine all predictions into one dataset ---
-df_all_preds <- bind_rows(
-  df_nb_pred, df_rf_pred, df_lda_pred, df_svm_pred, df_polr_pred, df_orf_pred
-)
-
-# --- Ensure VEI factors are ordered and consistent ---
-vei_levels <- as.character(0:7)
-df_all_preds <- df_all_preds %>%
-  mutate(
-    Expected_VEI  = factor(Expected_VEI,  levels = vei_levels, ordered = TRUE),
-    Predicted_VEI = factor(Predicted_VEI, levels = vei_levels, ordered = TRUE)
-  )
-
-# --- Color mapping for each model (kept your choices) ---
-model_colors <- c(
-  "Naive Bayes"   = "#009E73",
-  "Random Forest" = "#000000",
-  "LDA"           = "orange",
-  "SVM"           = "purple",
-  "POLR"          = "#009E73",
-  "ORF"           = "orange"
-)
-
-# --- Shape mapping for each model (distinct, colorblind-friendly) ---
-# 15 = filled square, 16 = filled circle, 17 = triangle up, 18 = diamond, 7 = triangle down, 8 = star
-model_shapes <- c(
-  "Naive Bayes"   = 16,  # circle
-  "Random Forest" = 17,  # triangle up
-  "LDA"           = 15,  # square
-  "SVM"           = 18,  # diamond
-  "POLR"          = 7,   # triangle down
-  "ORF"           = 8    # star
-)
-
-# --- Reusable plotting function with color + shape legends ---
-plot_ev <- function(df_sub, title_suffix) {
-  ggplot(df_sub, aes(x = Expected_VEI, y = Predicted_VEI, color = Model, shape = Model)) +
-    geom_jitter(width = 0.18, height = 0.18, size = 3.2, alpha = 0.35, stroke = 0.6) +
-    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray50") +
-    scale_color_manual(values = model_colors, drop = FALSE, name = "Models") +
-    scale_shape_manual(values = model_shapes, drop = FALSE, name = "Models") +
-    scale_x_discrete(drop = FALSE) +
-    scale_y_discrete(drop = FALSE) +
-    labs(
-      title = paste("Expected vs Predicted VEI (AVO - Mean) —", title_suffix),
-      x = "Expected VEI", y = "Predicted VEI"
-    ) +
-    theme_minimal() +
-    theme(
-      axis.text = element_text(face = "bold"),
-      legend.position = "bottom",
-      legend.title = element_text(face = "bold"),
-      legend.text  = element_text(size = 10)
-    )
-}
-
-# --- Split models into two groups ---
-group1 <- c("Naive Bayes", "Random Forest", "LDA")
-group2 <- c("SVM", "POLR", "ORF")
-
-# --- Create plots for each group ---
-p1 <- df_all_preds %>% filter(Model %in% group1) %>% plot_ev("NB / RF / LDA")
-p2 <- df_all_preds %>% filter(Model %in% group2) %>% plot_ev("SVM / POLR / ORF")
-
-# Display separately
-p1
-p2
-
-# Option: side by side (if you use patchwork)
-# library(patchwork)
-# p1 | p2
-
-```
-
-facettes
-
-```{r}
-library(dplyr)
-library(ggplot2)
 
 # --- Ensure ordered factors ---
 vei_levels <- as.character(1:7)
@@ -1460,11 +1165,9 @@ model_rf <- ranger(
   probability = TRUE
 )
 
-# Prédictions
 probs_mat <- predict(model_rf, data = eruption_summary_vei7[, X_mean_cols])$predictions
 probs_df  <- as.data.frame(probs_mat)
 
-# Renommer les colonnes avec juste le numéro de la classe
 colnames(probs_df) <- colnames(probs_mat)
 
 pred_cls <- colnames(probs_mat)[max.col(probs_mat, ties.method = "first")]
@@ -1625,51 +1328,8 @@ print(result_vei7_orf)
 
 
 
-# graph for rf and nb (no vei 7 in training set)
 
-```{r graphique 0}
-library(ggplot2)
-library(dplyr)
-
-df_nb <- as.data.frame(result_vei7_nb) %>%
-  rename(Predicted_VEI = Predicted_Class) %>%
-  mutate(Model = "Naive Bayes")
-
-df_rf <- as.data.frame(result_vei7_rf) %>%
-  rename(Predicted_VEI = Predicted_Class) %>%
-  mutate(Model = "Random Forest")
-
-dfs <- list(df_nb, df_rf)
-dfs <- lapply(dfs, function(df) {
-  df$Predicted_VEI <- factor(df$Predicted_VEI, levels = as.character(1:7))
-  df$Eruption <- as.character(df$Eruption)
-  df
-})
-
-df_all <- bind_rows(dfs)
-
-df_all$Eruption <- factor(df_all$Eruption, levels = unique(df_all$Eruption))
-
-ggplot(df_all, aes(x = Eruption, y = Predicted_VEI, color = Model)) +
-  geom_point(size = 4, alpha = 0.8, position = position_dodge(width = 0.6)) +
-  theme_minimal() +
-  labs(
-    title = "Predicted VEI for VEI 7 Eruptions by Model",
-    x = "Eruption",
-    y = "Predicted VEI"
-  ) +
-  scale_color_manual(values = c(
-    "Naive Bayes" = "steelblue",
-    "Random Forest" = "darkorange"
-  )) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-
-```
-
-
-
-all models
+# graph for all models
 
 
 ```{r}
@@ -2001,52 +1661,7 @@ print(result_orf_aug)
 
 
 
-
-
-# graph for nb and rf (with vei 7 in training set)
-
-
-```{r}
-library(ggplot2)
-library(dplyr)
-
-df_nb_aug <- as.data.frame(result_vei7_nb_aug) %>%
-  rename(Predicted_VEI = Predicted_Class) %>%
-  mutate(Model = "Naive Bayes")
-
-df_rf_aug <- as.data.frame(result_rf_aug) %>%
-  rename(Predicted_VEI = Predicted_Class) %>%
-  mutate(Model = "Random Forest")
-
-dfs_aug <- list(df_nb_aug, df_rf_aug)
-dfs_aug <- lapply(dfs_aug, function(df) {
-  df$Predicted_VEI <- factor(df$Predicted_VEI, levels = as.character(1:7))
-  df$Eruption <- as.character(df$Eruption)
-  df
-})
-
-df_all_aug <- bind_rows(dfs_aug)
-
-df_all_aug$Eruption <- factor(df_all_aug$Eruption, levels = unique(df_all_aug$Eruption))
-
-ggplot(df_all_aug, aes(x = Eruption, y = Predicted_VEI, color = Model)) +
-  geom_point(size = 4, alpha = 0.8, position = position_dodge(width = 0.6)) +
-  theme_minimal() +
-  labs(
-    title = "Predicted VEI for VEI 7 Eruptions by Model (with 3 VEI 7 in training)",
-    x = "Eruption",
-    y = "Predicted VEI"
-  ) +
-  scale_color_manual(values = c(
-    "Naive Bayes" = "steelblue",
-    "Random Forest" = "darkorange"
-  )) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-```
-
-
-all models
+# graph all models (with vei 7 in training set)
 
 ```{r}
 library(ggplot2)
